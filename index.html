@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Valentine Surprise</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600;700&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --pink-100: #ffe6ef;
+      --pink-200: #ffd4e4;
+      --pink-500: #ff5f9e;
+      --rose-600: #d6336c;
+      --wine-700: #9b1d4f;
+      --cream: #fff7fb;
+      --text: #3b1831;
+      --card: rgba(255, 255, 255, 0.86);
+      --shadow: 0 12px 30px rgba(155, 29, 79, 0.2);
+      --glow: 0 0 0 rgba(255, 95, 158, 0);
+    }
+
+    body.theme-dark {
+      --text: #ffe4f2;
+      --cream: #351022;
+      --card: rgba(34, 10, 24, 0.83);
+      --pink-100: #4a1530;
+      --pink-200: #6d2346;
+      --wine-700: #ffc7e4;
+      --shadow: 0 12px 36px rgba(10, 0, 6, 0.55);
+      --glow: 0 0 26px rgba(255, 95, 158, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Poppins", sans-serif;
+      color: var(--text);
+      overflow-x: hidden;
+      position: relative;
+      background: #ffd9ea;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: -20%;
+      z-index: -2;
+      background: linear-gradient(125deg, #fff4fb, #ffd6e9, #ffbedc, #ffcfe6, #fff0f7);
+      background-size: 280% 280%;
+      animation: gradientFlow 16s ease infinite;
+    }
+
+    body.theme-dark::before {
+      background: linear-gradient(125deg, #1a0611, #2a0d1d, #43122b, #280a1b, #16050f);
+      background-size: 280% 280%;
+    }
+
+    @keyframes gradientFlow {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    .hearts,
+    .sparkles,
+    #fxCanvas {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .hearts, .sparkles { z-index: 0; overflow: hidden; }
+    #fxCanvas { z-index: 3; }
+
+    .heart, .sparkle {
+      position: absolute;
+      animation: floatUp linear infinite;
+      opacity: 0;
+    }
+
+    .heart {
+      width: 12px;
+      height: 12px;
+      background: rgba(255, 95, 158, 0.4);
+      transform: rotate(45deg);
+    }
+
+    .heart::before, .heart::after {
+      content: "";
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: inherit;
+    }
+
+    .heart::before { left: -6px; }
+    .heart::after { top: -6px; }
+
+    .sparkle {
+      width: 6px;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 50%;
+      box-shadow: 0 0 14px rgba(255, 255, 255, 0.95);
+      animation-duration: 8s;
+    }
+
+    @keyframes floatUp {
+      from { transform: translateY(115vh) scale(0.7); opacity: 0; }
+      10% { opacity: 0.85; }
+      to { transform: translateY(-15vh) scale(1.15); opacity: 0; }
+    }
+
+    .wrapper {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 2rem 1rem;
+    }
+
+    .card {
+      width: min(780px, 100%);
+      background: var(--card);
+      border: 1px solid rgba(214, 51, 108, 0.22);
+      backdrop-filter: blur(6px);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      padding: clamp(1.5rem, 4vw, 2.8rem);
+      text-align: center;
+      position: relative;
+      transition: box-shadow 250ms ease, transform 250ms ease;
+    }
+
+    .card:hover {
+      box-shadow: var(--shadow), 0 0 24px rgba(255, 95, 158, 0.3), var(--glow);
+      transform: translateY(-2px);
+    }
+
+    .toolbar {
+      position: absolute;
+      right: 1rem;
+      top: 1rem;
+      display: flex;
+      gap: 0.55rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--pink-100);
+      color: var(--wine-700);
+      padding: 0.45rem 1rem;
+      border-radius: 999px;
+      font-size: 0.92rem;
+      font-weight: 500;
+      margin-bottom: 1rem;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    h1 {
+      margin: 0;
+      font-family: "Dancing Script", cursive;
+      font-size: clamp(2.4rem, 6vw, 4.3rem);
+      color: var(--rose-600);
+      line-height: 1.1;
+    }
+
+    body.theme-dark h1 { color: #ff88bd; }
+
+    .subtitle {
+      margin: 1rem auto 0;
+      max-width: 56ch;
+      font-size: clamp(1rem, 2.4vw, 1.15rem);
+      line-height: 1.7;
+      color: color-mix(in srgb, var(--text) 80%, #65213f 20%);
+      min-height: 3rem;
+    }
+
+    .phase { margin-top: 1.5rem; }
+    .hidden { display: none; }
+
+    .question-area {
+      position: relative;
+      min-height: 180px;
+      margin-top: 1.4rem;
+    }
+
+    .ask-buttons,
+    .actions {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.8rem;
+      flex-wrap: wrap;
+      width: 100%;
+      max-width: 480px;
+      margin-top: 0.8rem;
+    }
+
+    button {
+      border: none;
+      border-radius: 999px;
+      padding: 0.75rem 1.3rem;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--pink-500), var(--rose-600));
+      color: white;
+      box-shadow: 0 8px 18px rgba(214, 51, 108, 0.25);
+    }
+
+    .btn-secondary {
+      background: #fff;
+      color: var(--rose-600);
+      border: 1px solid var(--pink-200);
+    }
+
+    body.theme-dark .btn-secondary {
+      background: #2e0c1f;
+      color: #ffd2e9;
+    }
+
+    #yesBtn:hover { transform: scale(1.11); }
+
+    #noBtn {
+      position: absolute;
+      left: 58%;
+      top: 95px;
+      z-index: 2;
+      white-space: nowrap;
+    }
+
+    .no-bounce {
+      animation: noBounce 350ms ease;
+    }
+
+    @keyframes noBounce {
+      0% { transform: translateY(0); }
+      30% { transform: translateY(-16px); }
+      60% { transform: translateY(2px); }
+      100% { transform: translateY(0); }
+    }
+
+    .envelope-wrap {
+      margin-top: 1.2rem;
+      display: grid;
+      place-items: center;
+      gap: 0.7rem;
+    }
+
+    .envelope {
+      width: 180px;
+      height: 118px;
+      position: relative;
+      cursor: pointer;
+      perspective: 700px;
+    }
+
+    .envelope-body {
+      position: absolute;
+      inset: 0;
+      border-radius: 10px;
+      background: linear-gradient(145deg, #ffcde2, #ffb5d4);
+      border: 1px solid #f596c0;
+      box-shadow: 0 12px 20px rgba(155, 29, 79, 0.18);
+    }
+
+    .envelope-flap {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      transform-origin: top center;
+      transition: transform 500ms ease;
+      background: linear-gradient(145deg, #ff9bc7, #ff7cb5);
+      clip-path: polygon(0 0, 100% 0, 50% 100%);
+      z-index: 2;
+    }
+
+    .envelope.open .envelope-flap { transform: rotateX(165deg); }
+
+    #letter {
+      margin-top: 1.2rem;
+      background: var(--cream);
+      border: 1px solid var(--pink-200);
+      border-radius: 18px;
+      padding: 1rem 1.15rem;
+      text-align: left;
+      line-height: 1.75;
+      max-height: 0;
+      overflow: hidden;
+      overscroll-behavior: contain;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: all 350ms ease;
+      width: min(660px, 100%);
+    }
+
+    #letter.open {
+      max-height: min(45vh, 420px);
+      overflow-y: auto;
+      opacity: 1;
+      transform: translateY(0);
+      -webkit-overflow-scrolling: touch;
+    }
+
+    #letter.open::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    #letter.open::-webkit-scrollbar-thumb {
+      background: rgba(214, 51, 108, 0.45);
+      border-radius: 999px;
+    }
+
+    .countdown {
+      margin-top: 1.3rem;
+      font-weight: 500;
+      color: var(--wine-700);
+    }
+
+    .easter {
+      margin-top: 0.8rem;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: all 260ms ease;
+      color: #b1135a;
+      font-weight: 500;
+    }
+
+    .easter.show { opacity: 1; transform: translateY(0); }
+
+    body.paused .heart,
+    body.paused .sparkle,
+    body.paused::before {
+      animation-play-state: paused !important;
+    }
+
+    @media (max-width: 520px) {
+      .card { border-radius: 22px; }
+      .ask-buttons,
+      .actions { flex-direction: column; }
+      .ask-buttons button,
+      .actions button,
+      .toolbar button { width: 100%; }
+      .toolbar { position: static; margin-bottom: 0.8rem; }
+      #noBtn { width: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="hearts" aria-hidden="true" id="hearts"></div>
+  <div class="sparkles" aria-hidden="true" id="sparkles"></div>
+  <canvas id="fxCanvas" aria-hidden="true"></canvas>
+
+  <main class="wrapper">
+    <section class="card" id="card">
+      <div class="toolbar">
+        <button class="btn-secondary" id="themeToggle" type="button">🌙 Dark</button>
+      </div>
+
+      <span class="pill" id="pill">💖 Happy Valentine’s Day 💖</span>
+      <h1 id="title">To my Sanika</h1>
+      <p class="subtitle" id="subtitle">I made something special for you...</p>
+
+      <section class="phase" id="phase1">
+        <h2 style="margin: 0; color: #9b1d4f; font-size: 1.4rem;">Will you be my Valentine?</h2>
+        <div class="question-area" id="questionArea">
+          <div class="ask-buttons">
+            <button class="btn-primary" id="yesBtn" type="button">Yes 💘</button>
+          </div>
+          <button class="btn-secondary" id="noBtn" type="button">No 🙈</button>
+        </div>
+      </section>
+
+      <section class="phase hidden" id="phase2">
+        <div class="actions">
+          <button class="btn-primary" id="revealBtn" type="button">Open My Love Letter</button>
+          <button class="btn-secondary" id="nextLineBtn" type="button">Tell Me Something Sweet</button>
+        </div>
+
+        <div class="envelope-wrap">
+          <div class="envelope" id="envelope" role="button" tabindex="0" aria-label="Open envelope">
+            <div class="envelope-flap"></div>
+            <div class="envelope-body"></div>
+          </div>
+        </div>
+
+        <article id="letter" aria-live="polite"><div id="typedLetter"></div></article>
+        <p style="margin:0.45rem 0 0; font-size:0.85rem; color:#8f3d63;">Tip: Scroll inside the letter to read everything 💌</p>
+        <p class="countdown" id="countdown"></p>
+        <p class="easter" id="easter">✨ Easter egg unlocked: You found my secret kiss counter! xoxo ✨</p>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const lightThemeLetter = `My dearest Sanika,
+
+Today is our very first Valentine's Day together, and even though miles keep us apart, my heart has never felt closer to yours. From the moment we started this beautiful journey, you’ve made every ordinary day feel special. And now, on this day made for love, I just want to tell you how incredibly happy you make me.
+
+You are my favorite thought in the morning, my sweetest dream at night, and the warm feeling that stays with me all day long. Your smile lights up my world brighter than any sun, your laugh is my favorite sound, and your kind heart is the reason I believe in true love.
+
+I keep thinking about all our little moments — the late-night texts, the silly jokes only we understand, the way you say my name, and how you make me feel like the luckiest guy alive. This is just our first Valentine's, but I already know I want to celebrate every single one with you for the rest of my life.
+
+Even though I can’t hold your hand or look into your beautiful eyes today, please know that you are wrapped in my love every second. I’m counting down the days until I can pull you into the biggest hug and tell you in person how much you mean to me.
+
+You are my best friend, my safe place, my happiest surprise, and the love of my life. Thank you for choosing me. Thank you for being you. I’m so excited for all the adventures, laughter, and quiet moments we’ll share in the years ahead.
+
+Happy First Valentine’s Day, my sweet girl. You make my world so much more beautiful just by being in it.
+
+With all my love, today and always, Aadarsh ❤️
+
+P.S. I saved the biggest chocolate and the softest hoddie for you. They’re waiting right here until I can give them to you myself!`;
+
+    const darkThemeLetter = `My Demon Queen,
+
+This is our very first Valentine's Day... and I wish I could be there right now to show you exactly what this day means to me. Instead, I’m counting the kilometers between us and imagining the moment I can finally hold you close again.
+
+I keep thinking about how this is the start of so many firsts with you — the first time I get to call you my Valentine, the first of many celebrations we’ll share, and the first time I’ve ever felt this certain about someone.
+
+Right now I’m replaying memories of you — your smile, your eyes, your voice, the way you look at me and make everything else disappear. Even from far away, you stay in my mind in every quiet moment.
+
+If I could teleport to you tonight, I’d start by holding you close, kissing your forehead, and telling you how deeply you’re loved. I’d remind you that you’re my peace, my fire, my favorite person, and the one I keep choosing every single day.
+
+Distance is hard, but it’s only making us stronger. One day soon, this gap will close, and we’ll laugh about these long-distance nights while making new memories side by side.
+
+Until then, remember this: you are the only one I want, the only one who makes my heart race like this, and the only one who feels like home to me.
+
+Happy first Valentine’s Day, my beautiful girl. You are already my forever favorite.
+
+All my heat, all my love,
+
+Aadarsh
+
+P.S. Save me your sweetest smile for our next hug — I’m counting down the days. 😈`;
+
+    function getActiveLetter() {
+      return document.body.classList.contains('theme-dark') ? darkThemeLetter : lightThemeLetter;
+    }
+
+
+    const sweetLines = [
+      "I knew you would say yes, and my heart is so full right now. 💖",
+      "With you, every day feels like Valentine’s Day.",
+      "If I had to choose again, I’d choose you in every lifetime.",
+      "You are my favorite hello and my hardest goodbye.",
+      "Your smile is still my favorite view.",
+      "I love you more than words, more than songs, more than stars."
+    ];
+
+    const isMobile = window.matchMedia('(max-width: 520px)').matches;
+    const title = document.getElementById('title');
+    const pill = document.getElementById('pill');
+    const subtitle = document.getElementById('subtitle');
+    const phase1 = document.getElementById('phase1');
+    const phase2 = document.getElementById('phase2');
+    const questionArea = document.getElementById('questionArea');
+    const yesBtn = document.getElementById('yesBtn');
+    const noBtn = document.getElementById('noBtn');
+    const nextLineBtn = document.getElementById('nextLineBtn');
+    const revealBtn = document.getElementById('revealBtn');
+    const letter = document.getElementById('letter');
+    const typedLetter = document.getElementById('typedLetter');
+    const envelope = document.getElementById('envelope');
+    const countdown = document.getElementById('countdown');
+    const easter = document.getElementById('easter');
+    const heartsContainer = document.getElementById('hearts');
+    const sparklesContainer = document.getElementById('sparkles');
+    const themeToggle = document.getElementById('themeToggle');
+    const fxCanvas = document.getElementById('fxCanvas');
+    const ctx = fxCanvas.getContext('2d');
+
+    let lineIndex = 0;
+    let typingTimer;
+    let countdownInterval;
+    let confettiActive = false;
+    let fireworksMode = false;
+    let easterClicks = 0;
+    const particles = [];
+
+    function resizeCanvas() {
+      fxCanvas.width = window.innerWidth;
+      fxCanvas.height = window.innerHeight;
+    }
+
+    function moveNoButton() {
+      if (isMobile) {
+        noBtn.classList.remove('no-bounce');
+        noBtn.style.left = '58%';
+        noBtn.style.top = '95px';
+        void noBtn.offsetWidth;
+        noBtn.classList.add('no-bounce');
+        return;
+      }
+      const areaRect = questionArea.getBoundingClientRect();
+      const btnRect = noBtn.getBoundingClientRect();
+      const maxX = Math.max(10, areaRect.width - btnRect.width - 10);
+      const maxY = Math.max(10, areaRect.height - btnRect.height - 10);
+      noBtn.style.left = `${Math.random() * maxX}px`;
+      noBtn.style.top = `${Math.random() * maxY}px`;
+    }
+
+    function vibrate(ms = 25) {
+      if (navigator.vibrate) navigator.vibrate(ms);
+    }
+
+    function typeLetter(text) {
+      clearInterval(typingTimer);
+      typedLetter.innerHTML = '';
+      let i = 0;
+      typingTimer = setInterval(() => {
+        i += 1;
+        typedLetter.innerHTML = text.slice(0, i).replace(/\n/g, '<br>');
+        if (i >= text.length) clearInterval(typingTimer);
+      }, 18);
+    }
+
+    function toggleLetter() {
+      const shouldOpen = !letter.classList.contains('open');
+      letter.classList.toggle('open');
+      envelope.classList.toggle('open', shouldOpen);
+      revealBtn.textContent = shouldOpen ? 'Close Letter' : 'Open My Love Letter';
+      if (shouldOpen) {
+        typeLetter(getActiveLetter());
+        letter.scrollTop = 0;
+      }
+    }
+
+    function renderCountdown() {
+      const now = new Date();
+      const year = now.getMonth() > 1 || (now.getMonth() === 1 && now.getDate() > 14) ? now.getFullYear() + 1 : now.getFullYear();
+      const valentine = new Date(year, 1, 14, 0, 0, 0);
+      const diff = valentine - now;
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+      const minutes = Math.floor((diff / (1000 * 60)) % 60);
+      countdown.textContent = diff > 0 ? `⏳ ${days}d ${hours}h ${minutes}m until Valentine’s Day` : "💘 It’s Valentine’s Day today!";
+    }
+
+    function spawnFloaters(container, className, count) {
+      for (let i = 0; i < count; i++) {
+        const el = document.createElement('span');
+        el.className = className;
+        el.style.left = `${Math.random() * 100}%`;
+        el.style.animationDuration = `${7 + Math.random() * 8}s`;
+        el.style.animationDelay = `${Math.random() * 7}s`;
+        el.style.opacity = Math.random().toFixed(2);
+        container.appendChild(el);
+      }
+    }
+
+    function burst(x, y, count, palette) {
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 * i) / count + Math.random() * 0.2;
+        const speed = 2 + Math.random() * 3;
+        particles.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 70 + Math.random() * 40,
+          color: palette[Math.floor(Math.random() * palette.length)],
+          size: 2 + Math.random() * 3,
+          gravity: 0.03 + Math.random() * 0.05
+        });
+      }
+    }
+
+    function confettiBlast() {
+      const colors = ['#ff5f9e', '#ffcf4a', '#5ad1ff', '#a58bff', '#ffffff'];
+      for (let i = 0; i < 6; i++) burst(Math.random() * fxCanvas.width, fxCanvas.height * 0.2, 36, colors);
+      confettiActive = true;
+    }
+
+    function maybeValentineMidnightFireworks() {
+      const now = new Date();
+      const isValentineMidnight = now.getMonth() === 1 && now.getDate() === 14 && now.getHours() === 0;
+      fireworksMode = isValentineMidnight;
+    }
+
+    function animateFx() {
+      ctx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+      if (document.hidden) {
+        requestAnimationFrame(animateFx);
+        return;
+      }
+
+      if (fireworksMode && Math.random() < 0.06) {
+        burst(Math.random() * fxCanvas.width, 100 + Math.random() * (fxCanvas.height * 0.35), 44, ['#ff6dad', '#ffd166', '#7df9ff', '#ffffff']);
+      }
+
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += p.gravity;
+        p.life -= 1;
+
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, p.life / 100);
+        ctx.fillRect(p.x, p.y, p.size, p.size * 1.6);
+
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+
+      ctx.globalAlpha = 1;
+      if (confettiActive && particles.length === 0) confettiActive = false;
+      requestAnimationFrame(animateFx);
+    }
+
+    function toggleTheme() {
+      document.body.classList.toggle('theme-dark');
+      themeToggle.textContent = document.body.classList.contains('theme-dark') ? '☀️ Light' : '🌙 Dark';
+      if (letter.classList.contains('open')) typeLetter(getActiveLetter());
+    }
+
+    ['mouseenter', 'mousedown', 'touchstart', 'click'].forEach((eventName) => {
+      noBtn.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        moveNoButton();
+        vibrate(12);
+      });
+    });
+
+    yesBtn.addEventListener('click', () => {
+      phase1.classList.add('hidden');
+      phase2.classList.remove('hidden');
+      subtitle.textContent = 'I knew you would answer yes. Now let me tell you how much I love you.';
+      lineIndex = 0;
+      letter.classList.remove('open');
+      envelope.classList.remove('open');
+      revealBtn.textContent = 'Open My Love Letter';
+      burst(fxCanvas.width * 0.5, fxCanvas.height * 0.35, 90, ['#ff5f9e', '#ffd166', '#7df9ff', '#ffffff']);
+      confettiBlast();
+      vibrate(30);
+    });
+
+    nextLineBtn.addEventListener('click', () => {
+      lineIndex = (lineIndex + 1) % sweetLines.length;
+      subtitle.textContent = sweetLines[lineIndex];
+    });
+
+    revealBtn.addEventListener('click', toggleLetter);
+    envelope.addEventListener('click', toggleLetter);
+    envelope.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggleLetter();
+      }
+    });
+
+    themeToggle.addEventListener('click', toggleTheme);
+
+    pill.addEventListener('click', () => {
+      easterClicks += 1;
+      if (easterClicks >= 7) {
+        easter.classList.add('show');
+        subtitle.textContent = 'Secret unlocked: 7 kisses redeemed 😘';
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      document.body.classList.toggle('paused', document.hidden);
+      if (document.hidden) {
+        clearInterval(typingTimer);
+        clearInterval(countdownInterval);
+      } else {
+        renderCountdown();
+        countdownInterval = setInterval(renderCountdown, 60000);
+        const activeLetter = getActiveLetter();
+        if (letter.classList.contains('open') && typedLetter.textContent.length < activeLetter.length) {
+          typeLetter(activeLetter);
+        }
+      }
+    });
+
+    window.addEventListener('resize', resizeCanvas);
+
+    resizeCanvas();
+    moveNoButton();
+    renderCountdown();
+    countdownInterval = setInterval(renderCountdown, 60000);
+    maybeValentineMidnightFireworks();
+    setInterval(maybeValentineMidnightFireworks, 60000);
+    spawnFloaters(heartsContainer, 'heart', 24);
+    spawnFloaters(sparklesContainer, 'sparkle', 22);
+    animateFx();
+  </script>
+</body>
+</html>
