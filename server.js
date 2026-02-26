@@ -13,448 +13,561 @@ app.use(
     saveUninitialized: true,
   })
 );
-
 app.use(express.static(path.join(__dirname)));
 
-const RPG_SYSTEM_PROMPT =
-  'You are an advanced RPG engine. Track player stats, HP, MP, inventory, morality, achievements, and titles. Respond with immersive narrative only. Internally update state based on player actions. Combat reduces HP. Spells consume MP. Dialogue may alter morality. Trigger appropriate endings when conditions are met.';
+const SYSTEM_PROMPT =
+  'You are an advanced RPG engine. Track player stats, HP, MP, inventory, morality, achievements, titles, factions, events, map position, and boss phases. Respond with immersive narrative only.';
 
-const STARTER_ITEMS = [
-  { name: 'Minor Health Potion', type: 'potion', effect: { health: 25 } },
-  { name: 'Ember Wand', type: 'weapon', effect: { intelligence: 2, spellBoost: 1 } },
-  { name: 'Veil Charm', type: 'artifact', effect: { dodge: 8 } },
-];
+const SKILL_TREE = {
+  warrior: [
+    { id: 'power_strike', name: 'Power Strike', prereq: null },
+    { id: 'iron_skin', name: 'Iron Skin', prereq: 'power_strike' },
+    { id: 'berserker_rage', name: 'Berserker Rage', prereq: 'iron_skin' },
+  ],
+  mage: [
+    { id: 'fireball', name: 'Fireball', prereq: null },
+    { id: 'mana_surge', name: 'Mana Surge', prereq: 'fireball' },
+    { id: 'arcane_shield', name: 'Arcane Shield', prereq: 'mana_surge' },
+  ],
+  rogue: [
+    { id: 'backstab', name: 'Backstab', prereq: null },
+    { id: 'shadow_step', name: 'Shadow Step', prereq: 'backstab' },
+    { id: 'poison_blade', name: 'Poison Blade', prereq: 'shadow_step' },
+  ],
+};
 
-function createInitialState() {
+const dailyBoards = {};
+
+const TILE_TYPES = ['Forest', 'Dungeon', 'Village', 'Ruins', 'Boss Arena', 'Event Zone'];
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
+function seedHash(seed, x, y) {
+  const str = `${seed}:${x}:${y}`;
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i += 1) {
+    h ^= str.charCodeAt(i);
+    h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
+  }
+  return Math.abs(h >>> 0);
+}
+
+function tileAt(seed, x, y) {
+  const idx = seedHash(seed, x, y) % TILE_TYPES.length;
+  return TILE_TYPES[idx];
+}
+
+function todaySeed() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = `${d.getMonth() + 1}`.padStart(2, '0');
+  const day = `${d.getDate()}`.padStart(2, '0');
+  return Number(`${y}${m}${day}`);
+}
+
+function defaultState() {
   return {
     started: false,
     name: 'Adventurer',
+    turn: 0,
     level: 1,
     xp: 0,
+    skillPoints: 0,
+    unlockedSkills: [],
     health: 100,
     maxHealth: 100,
     mana: 60,
     maxMana: 60,
-    stats: {
-      strength: 3,
-      intelligence: 3,
-      dexterity: 3,
-      charisma: 3,
-    },
-    inventory: [...STARTER_ITEMS],
+    stats: { strength: 3, intelligence: 3, dexterity: 3, charisma: 3 },
+    inventory: [{ name: 'Minor Potion', type: 'potion', effect: { health: 25 } }],
     morality: 0,
     titles: ['Novice Adventurer'],
     achievements: [],
-    rareItemFound: false,
+    factions: { ironLegion: 0, arcaneCircle: 0, shadowGuild: 0 },
+    worldEvents: [],
+    activeEffects: [],
+    mapSeed: Math.floor(Math.random() * 10_000_000),
+    mapSize: 10,
+    playerPosition: { x: 0, y: 0 },
+    discoveredTiles: ['0,0'],
     inCombat: false,
     enemy: null,
-    firstSpellCast: false,
-    firstBattleDone: false,
-    damageEvents: [],
+    hardcoreMode: false,
+    ngPlus: false,
+    ngPlusUnlocked: false,
+    dailyMode: false,
+    dailySeed: null,
     gameOver: false,
     ending: null,
-    history: [
-      {
-        role: 'assistant',
-        content:
-          'The wind carries a prophecy to the Ember Frontier. A gate of obsidian opens before you as your fate awakens.',
-      },
-    ],
+    bossPhaseTransition: null,
+    history: [{ role: 'assistant', content: 'The Ember Gate opens. Destiny waits in the ash-winds.' }],
   };
 }
 
 function getState(req) {
   if (!req.session.playerState) {
-    req.session.playerState = createInitialState();
+    req.session.playerState = defaultState();
     req.session.saves = {};
+    req.session.profile = { completed: false, titles: [], achievements: [], carryStats: null, hardcoreClear: false };
   }
   return req.session.playerState;
 }
 
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function addAchievement(state, achievement, events) {
-  if (!state.achievements.includes(achievement)) {
-    state.achievements.push(achievement);
-    events.push({ type: 'achievement', value: achievement });
+function addAchievement(state, value, events) {
+  if (!state.achievements.includes(value)) {
+    state.achievements.push(value);
+    events.push({ type: 'achievement', value });
   }
 }
 
-function addTitle(state, title, events) {
-  if (!state.titles.includes(title)) {
-    state.titles.push(title);
-    events.push({ type: 'title', value: title });
+function addTitle(state, value, events) {
+  if (!state.titles.includes(value)) {
+    state.titles.push(value);
+    events.push({ type: 'title', value });
   }
 }
 
-function applyLeveling(state, events) {
-  let requiredXp = state.level * 100;
-  while (state.xp >= requiredXp) {
-    state.level += 1;
-    state.maxHealth += 12;
-    state.maxMana += 8;
-    state.health = Math.min(state.maxHealth, state.health + 12);
-    state.mana = Math.min(state.maxMana, state.mana + 8);
-    state.stats.strength += 1;
-    state.stats.intelligence += 1;
-    state.stats.dexterity += 1;
-    state.stats.charisma += 1;
-    events.push({ type: 'levelup', value: state.level });
-    requiredXp = state.level * 100;
+function movePlayer(state, dir) {
+  const d = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] }[dir];
+  if (!d) return { ok: false, text: '' };
+  const nx = state.playerPosition.x + d[0];
+  const ny = state.playerPosition.y + d[1];
+  if (nx < 0 || ny < 0 || nx >= state.mapSize || ny >= state.mapSize) {
+    return { ok: false, text: 'Ancient barriers block your path at the world edge.' };
   }
+  state.playerPosition = { x: nx, y: ny };
+  const key = `${nx},${ny}`;
+  if (!state.discoveredTiles.includes(key)) state.discoveredTiles.push(key);
+  const tile = tileAt(state.mapSeed, nx, ny);
+  let text = `You travel ${dir} into a ${tile}. `;
+  if (tile === 'Boss Arena' && !state.gameOver && !state.inCombat) {
+    state.inCombat = true;
+    state.enemy = { name: 'Abyssal Sovereign', kind: 'boss', health: 220, maxHealth: 220, attack: 16, phase: 1, poisonTurns: 0 };
+    text += 'A colossal sovereign emerges; final battle begins. ';
+  }
+  return { ok: true, text };
 }
 
-function determineEnding(state) {
-  if (state.health <= 0) return 'Death Ending';
-  if (state.gameOver && state.inventory.some((item) => item.name === 'Celestial Sigil') && state.level >= 6) return 'Secret God Ending';
-  if (state.gameOver && state.morality >= 45 && !state.inCombat) return 'Hero Ending';
-  if (state.gameOver && state.stats.intelligence >= 14 && state.morality > -15) return 'Scholar Ending';
-  if (state.gameOver && state.morality <= -45) return 'Tyrant Ending';
-  if (state.gameOver && state.morality < 0) return 'Corrupted Ending';
-  return null;
+function weightedEvent() {
+  const roll = Math.random() * 100;
+  if (roll < 20) return 'Meteor Strike';
+  if (roll < 40) return 'Plague';
+  if (roll < 58) return 'Traveling Merchant';
+  if (roll < 80) return 'Bandit Ambush';
+  return 'Divine Blessing';
 }
 
-function startBossFight(state) {
-  state.inCombat = true;
-  state.enemy = {
-    name: 'Abyssal Dragon',
-    health: 120,
-    maxHealth: 120,
-    attack: 18,
-  };
-}
-
-function computeCombatRound(state, action, events) {
-  const lower = action.toLowerCase();
-  if (!state.inCombat || !state.enemy) return '';
-
-  let narrative = '';
-  const critRoll = Math.random();
-  const dodgeChance = 0.08 + state.stats.dexterity * 0.01;
-
-  if (lower.includes('spell')) {
-    const manaCost = 12;
-    if (state.mana < manaCost) {
-      narrative += 'You attempt to cast, but your mana sputters into ash. ';
-    } else {
-      state.mana -= manaCost;
-      let damage = 10 + state.stats.intelligence * 3;
-      if (critRoll > 0.87) {
-        damage = Math.floor(damage * 1.8);
-        narrative += 'A blazing critical spell tears the battlefield apart. ';
-        events.push({ type: 'critical', value: damage });
-      }
-      state.enemy.health -= damage;
-      events.push({ type: 'damageToEnemy', value: damage });
-      if (!state.firstSpellCast) {
-        state.firstSpellCast = true;
-        addAchievement(state, 'First Spell', events);
-        addTitle(state, 'Mage of Embers', events);
-      }
-      narrative += `Your arcane blast strikes for ${damage} damage. `;
-    }
+function triggerEvent(state, events) {
+  const event = weightedEvent();
+  let text = '';
+  if (event === 'Meteor Strike') {
+    const dmg = 10 + Math.floor(Math.random() * 10);
+    state.health -= dmg;
+    state.factions.ironLegion -= 5;
+    state.factions.arcaneCircle -= 5;
+    state.factions.shadowGuild -= 5;
+    text = `Meteor Strike scorches the realm. You lose ${dmg} HP.`;
+    events.push({ type: 'damageToPlayer', value: dmg });
+  } else if (event === 'Plague') {
+    state.activeEffects.push({ id: 'plague', turns: 4 });
+    text = 'A plague spreads. Your vitality decays each turn until cured.';
+  } else if (event === 'Traveling Merchant') {
+    const rare = { name: `Relic-${Math.floor(Math.random() * 999)}`, type: 'artifact', effect: { morality: 5 } };
+    state.inventory.push(rare);
+    text = `A traveling merchant appears and offers a rare ${rare.name}.`;
+  } else if (event === 'Bandit Ambush') {
+    state.inCombat = true;
+    state.enemy = { name: 'Bandit Captain', kind: 'enemy', health: 70, maxHealth: 70, attack: 12, poisonTurns: 0 };
+    text = 'Bandits ambush your camp. Forced combat begins.';
   } else {
-    let damage = 8 + state.stats.strength * 2;
-    if (critRoll > 0.9) {
-      damage = Math.floor(damage * 1.7);
-      narrative += 'Critical hit! Steel and fury collide perfectly. ';
-      events.push({ type: 'critical', value: damage });
+    state.activeEffects.push({ id: 'divineBlessing', turns: 3 });
+    text = 'Divine Blessing surrounds you. Your power surges for a short time.';
+  }
+  state.worldEvents.push({ turn: state.turn, event, text });
+  if (state.worldEvents.length > 15) state.worldEvents = state.worldEvents.slice(-15);
+  events.push({ type: 'worldEvent', value: text });
+  return text;
+}
+
+function applyEffects(state, events) {
+  state.activeEffects = state.activeEffects
+    .map((e) => ({ ...e, turns: e.turns - 1 }))
+    .filter((e) => e.turns >= 0);
+
+  const plague = state.activeEffects.find((e) => e.id === 'plague' && e.turns >= 0);
+  if (plague) {
+    state.health -= 4;
+    events.push({ type: 'damageToPlayer', value: 4 });
+  }
+}
+
+function hasSkill(state, id) {
+  return state.unlockedSkills.includes(id);
+}
+
+function combatRound(state, action, events) {
+  if (!state.inCombat || !state.enemy) return '';
+  const lower = action.toLowerCase();
+  let text = '';
+  let damage = 6 + state.stats.strength * 2;
+  let manaCost = 0;
+
+  if (lower.includes('spell') || lower.includes('cast') || hasSkill(state, 'fireball')) {
+    manaCost = hasSkill(state, 'fireball') ? 10 : 8;
+    if (state.mana >= manaCost) {
+      state.mana -= manaCost;
+      damage = 9 + state.stats.intelligence * 3;
     }
-    state.enemy.health -= damage;
-    events.push({ type: 'damageToEnemy', value: damage });
-    narrative += `You carve into ${state.enemy.name} for ${damage} damage. `;
+  }
+  if (hasSkill(state, 'power_strike') && lower.includes('strike')) damage += 7;
+  if (hasSkill(state, 'berserker_rage') && state.health < state.maxHealth * 0.5) damage += 6;
+  if (hasSkill(state, 'backstab') && Math.random() > 0.7) {
+    damage = Math.floor(damage * 1.9);
+    events.push({ type: 'critical', value: damage });
+  }
+  if (hasSkill(state, 'poison_blade') && lower.includes('attack')) {
+    state.enemy.poisonTurns = 3;
+  }
+
+  state.enemy.health -= damage;
+  text += `You deal ${damage} damage to ${state.enemy.name}. `;
+  events.push({ type: 'damageToEnemy', value: damage });
+
+  if (state.enemy.poisonTurns > 0) {
+    state.enemy.health -= 5;
+    state.enemy.poisonTurns -= 1;
+    text += 'Poison gnaws at your foe. ';
+    events.push({ type: 'damageToEnemy', value: 5 });
+  }
+
+  if (state.enemy.kind === 'boss') {
+    const hpPct = state.enemy.health / state.enemy.maxHealth;
+    if (hpPct <= 0.6 && state.enemy.phase === 1) {
+      state.enemy.phase = 2;
+      state.bossPhaseTransition = 2;
+      text += 'Phase 2: the sovereign unleashes area devastation and summons shades. ';
+      events.push({ type: 'bossPhase', value: 2 });
+    }
+    if (hpPct <= 0.25 && state.enemy.phase === 2) {
+      state.enemy.phase = 3;
+      state.bossPhaseTransition = 3;
+      text += 'Phase 3: reality fractures under ultimate wrath. ';
+      events.push({ type: 'bossPhase', value: 3 });
+    }
   }
 
   if (state.enemy.health <= 0) {
-    state.enemy.health = 0;
+    const wasBoss = state.enemy.kind === 'boss';
     state.inCombat = false;
-    state.gameOver = true;
-    state.xp += 180;
-    state.morality += 10;
-    addTitle(state, 'Dragon Slayer', events);
-    narrative += 'The Abyssal Dragon crashes to the stone and the realm falls silent. ';
-    return narrative;
+    state.enemy.health = 0;
+    text += `${state.enemy.name} falls. `;
+    state.xp += wasBoss ? 280 : 70;
+    if (wasBoss) {
+      state.gameOver = true;
+      addTitle(state, 'Dragon Slayer', events);
+      if (state.hardcoreMode) reqProfileFromState(state).hardcoreClear = true;
+    }
+    state.enemy = null;
+    return text;
   }
 
-  if (Math.random() < dodgeChance) {
-    narrative += 'You slip through the return strike like a shadow. ';
-    addTitle(state, 'Shadow Walker', events);
-    return narrative;
+  let incoming = state.enemy.attack + Math.floor(Math.random() * 6);
+  if (state.enemy.kind === 'boss' && state.enemy.phase >= 2) incoming += 4;
+  if (state.enemy.kind === 'boss' && state.enemy.phase === 3) incoming += 6;
+
+  const dodgeBonus = hasSkill(state, 'shadow_step') ? 0.15 : 0;
+  if (Math.random() < 0.07 + state.stats.dexterity * 0.01 + dodgeBonus) {
+    text += 'You evade the incoming strike. ';
+  } else {
+    if (hasSkill(state, 'arcane_shield')) incoming = Math.floor(incoming * 0.75);
+    state.health -= incoming;
+    events.push({ type: 'damageToPlayer', value: incoming });
+    text += `${state.enemy.name} hits you for ${incoming}. `;
   }
 
-  const incoming = state.enemy.attack + Math.floor(Math.random() * 6);
-  state.health -= incoming;
-  events.push({ type: 'damageToPlayer', value: incoming });
-  narrative += `${state.enemy.name} retaliates and wounds you for ${incoming}. `;
-
-  return narrative;
+  return text;
 }
 
-function maybeFindRareItem(state, action, events) {
-  const lower = action.toLowerCase();
-  if (state.rareItemFound) return '';
-  if (lower.includes('search') || lower.includes('ruin') || lower.includes('altar')) {
-    const rareItem = { name: 'Celestial Sigil', type: 'artifact', effect: { morality: 10, ascension: true } };
-    state.inventory.push(rareItem);
-    state.rareItemFound = true;
-    addAchievement(state, 'First Rare Item', events);
-    return 'In the ruins, you uncover the Celestial Sigil pulsing with forgotten light. ';
-  }
-  return '';
+function reqProfileFromState(state) {
+  return state.__profileRef;
 }
 
-function applyNarrativeRules(state, action, events) {
+function applyFactionLogic(state, action, events) {
   const lower = action.toLowerCase();
-  let additions = '';
+  if (lower.includes('iron legion') && lower.includes('help')) state.factions.ironLegion += 10;
+  if (lower.includes('arcane circle') && lower.includes('help')) state.factions.arcaneCircle += 10;
+  if (lower.includes('shadow guild') && lower.includes('help')) state.factions.shadowGuild += 10;
+  if (lower.includes('iron legion') && lower.includes('attack')) state.factions.ironLegion -= 12;
+  if (lower.includes('arcane circle') && lower.includes('attack')) state.factions.arcaneCircle -= 12;
+  if (lower.includes('shadow guild') && lower.includes('attack')) state.factions.shadowGuild -= 12;
 
-  if (!state.firstBattleDone && (lower.includes('attack') || lower.includes('fight') || lower.includes('battle'))) {
-    state.firstBattleDone = true;
-    addAchievement(state, 'First Battle', events);
-    state.inCombat = true;
-    state.enemy = {
-      name: 'Ashfang Raider',
-      health: 50,
-      maxHealth: 50,
-      attack: 12,
-    };
-    additions += 'An Ashfang Raider leaps from the smoke and battle begins. ';
-  }
-
-  if (lower.includes('help') || lower.includes('spare') || lower.includes('protect')) {
-    state.morality += 6 + state.stats.charisma;
-  }
-  if (lower.includes('threaten') || lower.includes('steal') || lower.includes('betray')) {
-    state.morality -= 7;
-  }
-
-  if (lower.includes('trap')) {
-    const trapDamage = 7 + Math.floor(Math.random() * 9);
-    state.health -= trapDamage;
-    events.push({ type: 'damageToPlayer', value: trapDamage });
-    additions += `A hidden trap snaps shut and drains ${trapDamage} HP. `;
-  }
-
-  if (lower.includes('spell') && !state.inCombat) {
-    const manaCost = 8;
-    if (state.mana >= manaCost) {
-      state.mana -= manaCost;
-      state.xp += 12 + state.stats.intelligence;
-      additions += 'You weave a controlled spell and your mastery grows. ';
-      if (!state.firstSpellCast) {
-        state.firstSpellCast = true;
-        addAchievement(state, 'First Spell', events);
-        addTitle(state, 'Mage of Embers', events);
-      }
+  Object.keys(state.factions).forEach((key) => {
+    state.factions[key] = clamp(state.factions[key], -100, 100);
+    if (state.factions[key] <= -70 && Math.random() < 0.2 && !state.inCombat) {
+      state.inCombat = true;
+      state.enemy = { name: `${key} Assassin`, kind: 'enemy', health: 60, maxHealth: 60, attack: 14, poisonTurns: 0 };
+      events.push({ type: 'worldEvent', value: `${key} sends assassins after your betrayal.` });
     }
-  }
+  });
+}
 
-  additions += maybeFindRareItem(state, action, events);
+function computeEnding(state, events) {
+  if (state.health <= 0) return 'Death Ending';
+  if (!state.gameOver) return null;
 
-  if (lower.includes('dragon') || lower.includes('final boss')) {
-    if (!state.inCombat && !state.gameOver) {
-      startBossFight(state);
-      additions += 'The sky splits as the Abyssal Dragon descends for the final battle. ';
-    }
-  }
-
-  if (state.inCombat) {
-    additions += computeCombatRound(state, action, events);
-    if (!state.inCombat && state.enemy && state.enemy.name === 'Ashfang Raider' && state.enemy.health <= 0) {
-      state.xp += 45;
-      state.morality += 2;
-      additions += 'The raider collapses; nearby villagers hail your courage. ';
-      state.enemy = null;
-    }
-  }
-
-  state.xp += 8;
-
-  if (state.xp >= 100) {
-    addAchievement(state, '100 XP Gained', events);
-  }
-
-  if (state.health <= 0) {
-    state.health = 0;
-    state.gameOver = true;
-    addTitle(state, 'Fallen One', events);
-  }
-
-  if (state.inventory.some((item) => item.name === 'Celestial Sigil') && state.level >= 6) {
-    addTitle(state, 'Ascended', events);
-  }
-
-  state.health = clamp(state.health, 0, state.maxHealth);
-  state.mana = clamp(state.mana, 0, state.maxMana);
-  state.morality = clamp(state.morality, -100, 100);
-
-  applyLeveling(state, events);
-
-  state.ending = determineEnding(state);
-  if (state.ending === 'Secret God Ending') {
+  const domFaction = Object.entries(state.factions).sort((a, b) => b[1] - a[1])[0];
+  if (state.ngPlus && domFaction[1] >= 60) {
     addAchievement(state, 'Secret Ending Found', events);
+    return 'Eternal Paragon Ending';
   }
-
-  return additions;
+  if (domFaction[0] === 'ironLegion' && domFaction[1] > 40) return 'Hero Ending';
+  if (domFaction[0] === 'arcaneCircle' && state.stats.intelligence >= 14) return 'Scholar Ending';
+  if (domFaction[0] === 'shadowGuild' && state.morality < 0) return 'Corrupted Ending';
+  if (state.morality <= -40) return 'Tyrant Ending';
+  if (state.inventory.some((i) => i.name.includes('Relic')) && state.level >= 7) return 'Secret God Ending';
+  return 'Hero Ending';
 }
 
-async function generateAiNarrative(state, action, rulesNarrative) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  const messages = [
-    { role: 'system', content: RPG_SYSTEM_PROMPT },
-    ...state.history.slice(-10),
-    { role: 'user', content: action },
-  ];
-
-  if (!apiKey) {
-    return `You advance with intent. ${rulesNarrative}The world answers your will, and every choice etches deeper into legend.`;
+function applyXpAndLevel(state, events) {
+  while (state.xp >= state.level * 100) {
+    state.level += 1;
+    state.skillPoints += 1;
+    state.maxHealth += 10;
+    state.maxMana += 8;
+    state.health = Math.min(state.maxHealth, state.health + 10);
+    state.mana = Math.min(state.maxMana, state.mana + 8);
+    events.push({ type: 'levelup', value: state.level });
   }
+}
 
+async function aiNarrative(state, action, systemAdditions) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return `You act: ${action}. ${systemAdditions}`;
+  }
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
         temperature: 0.8,
-        messages,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          ...state.history.slice(-8),
+          {
+            role: 'system',
+            content: `State summary: HP ${state.health}/${state.maxHealth}, MP ${state.mana}/${state.maxMana}, pos (${state.playerPosition.x},${state.playerPosition.y}), combat=${state.inCombat}, events=${state.worldEvents.map((w) => w.event).join(', ')}`,
+          },
+          { role: 'user', content: action },
+        ],
       }),
     });
-
-    if (!response.ok) {
-      throw new Error(`OpenAI failed with status ${response.status}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content?.trim();
-    return content || `The journey continues. ${rulesNarrative}`;
-  } catch (error) {
-    return `A storm of fate interrupts the oracle. ${rulesNarrative}Still, your quest surges onward.`;
+    if (!response.ok) throw new Error('OpenAI request failed');
+    const json = await response.json();
+    return `${json.choices?.[0]?.message?.content?.trim() || ''} ${systemAdditions}`.trim();
+  } catch {
+    return `The oracle falters, yet fate advances. ${systemAdditions}`;
   }
 }
 
 app.get('/api/state', (req, res) => {
   const state = getState(req);
-  res.json({ state });
+  res.json({ state, skillTree: SKILL_TREE, dailyLeaderboard: dailyBoards[todaySeed()] || [] });
 });
 
 app.post('/api/start', (req, res) => {
-  const { name, stats } = req.body;
-  const total = Object.values(stats || {}).reduce((sum, val) => sum + Number(val || 0), 0);
+  const { name, stats, hardcoreMode, ngPlus, dailyMode } = req.body;
+  const total = Object.values(stats || {}).reduce((s, v) => s + Number(v || 0), 0);
+  if (total !== 5) return res.status(400).json({ error: 'Allocate exactly 5 points.' });
 
-  if (total !== 5) {
-    return res.status(400).json({ error: 'Allocate exactly 5 points.' });
-  }
+  if (!req.session.profile) req.session.profile = { completed: false, titles: [], achievements: [], carryStats: null, hardcoreClear: false };
+  if (ngPlus && !req.session.profile.completed) return res.status(400).json({ error: 'New Game Plus unlocks after one completion.' });
 
-  const state = createInitialState();
+  const state = defaultState();
   state.started = true;
-  state.name = (name || 'Adventurer').slice(0, 24);
+  state.name = String(name || 'Adventurer').slice(0, 24);
   state.stats.strength += Number(stats.strength || 0);
   state.stats.intelligence += Number(stats.intelligence || 0);
   state.stats.dexterity += Number(stats.dexterity || 0);
   state.stats.charisma += Number(stats.charisma || 0);
+  state.hardcoreMode = Boolean(hardcoreMode);
+  state.ngPlus = Boolean(ngPlus);
+  state.dailyMode = Boolean(dailyMode);
+  state.dailySeed = state.dailyMode ? todaySeed() : null;
+  if (state.dailyMode) state.mapSeed = state.dailySeed;
 
+  if (state.ngPlus && req.session.profile.carryStats) {
+    state.stats.strength += req.session.profile.carryStats.strength;
+    state.stats.intelligence += req.session.profile.carryStats.intelligence;
+    state.stats.dexterity += req.session.profile.carryStats.dexterity;
+    state.stats.charisma += req.session.profile.carryStats.charisma;
+    state.titles = Array.from(new Set([...state.titles, ...req.session.profile.titles]));
+    state.achievements = Array.from(new Set([...state.achievements, ...req.session.profile.achievements]));
+  }
+
+  state.__profileRef = req.session.profile;
   req.session.playerState = state;
   req.session.saves = {};
 
-  res.json({
-    state,
-    narrative: `Welcome, ${state.name}. Your boots touch the Ember Frontier as destiny stirs around you.`,
-    events: [{ type: 'title', value: 'Novice Adventurer' }],
-  });
+  res.json({ state, skillTree: SKILL_TREE, narrative: `Welcome ${state.name}. The frontier awakens around you.` });
+});
+
+app.post('/api/skill', (req, res) => {
+  const state = getState(req);
+  state.__profileRef = req.session.profile;
+  const { skillId } = req.body;
+  if (!state.started) return res.status(400).json({ error: 'Start first.' });
+  if (state.skillPoints <= 0) return res.status(400).json({ error: 'No skill points available.' });
+  if (state.unlockedSkills.includes(skillId)) return res.status(400).json({ error: 'Skill already unlocked.' });
+
+  const node = Object.values(SKILL_TREE).flat().find((s) => s.id === skillId);
+  if (!node) return res.status(404).json({ error: 'Unknown skill.' });
+  if (node.prereq && !state.unlockedSkills.includes(node.prereq)) return res.status(400).json({ error: 'Prerequisite skill locked.' });
+
+  if (skillId === 'iron_skin') state.maxHealth += 20;
+  if (skillId === 'mana_surge') state.maxMana += 20;
+
+  state.unlockedSkills.push(skillId);
+  state.skillPoints -= 1;
+  res.json({ state, unlocked: skillId });
 });
 
 app.post('/api/action', async (req, res) => {
   const state = getState(req);
-  if (!state.started) {
-    return res.status(400).json({ error: 'Start the game first.' });
-  }
-
+  state.__profileRef = req.session.profile;
+  if (!state.started) return res.status(400).json({ error: 'Start the game first.' });
   const action = String(req.body.action || '').trim();
-  if (!action) {
-    return res.status(400).json({ error: 'Action is required.' });
-  }
+  if (!action) return res.status(400).json({ error: 'Action required.' });
 
-  if (state.ending) {
-    return res.json({
-      state,
-      narrative: `Your fate is sealed: ${state.ending}. Begin a new journey to alter destiny.`,
-      events: [],
-    });
-  }
+  if (state.ending) return res.json({ state, events: [], narrative: `Ending achieved: ${state.ending}.` });
 
+  state.turn += 1;
   const events = [];
-  const rulesNarrative = applyNarrativeRules(state, action, events);
-  const aiNarrative = await generateAiNarrative(state, action, rulesNarrative);
+  let sysText = '';
 
-  const endingText = state.ending
-    ? `\n\nEnding Unlocked: ${state.ending}.`
-    : '';
-
-  const finalNarrative = `${aiNarrative}${endingText}`;
-
-  state.history.push({ role: 'user', content: action });
-  state.history.push({ role: 'assistant', content: finalNarrative });
-
-  if (state.history.length > 30) {
-    state.history = state.history.slice(-30);
+  if (/go north|go south|go east|go west/i.test(action)) {
+    const dir = action.toLowerCase().replace('go ', '').trim();
+    const move = movePlayer(state, dir);
+    sysText += move.text;
   }
 
-  res.json({ state, narrative: finalNarrative, events });
+  applyFactionLogic(state, action, events);
+
+  if (state.turn % 5 === 0 || Math.random() < 0.18 || (state.ngPlus && Math.random() < 0.15)) {
+    sysText += `${triggerEvent(state, events)} `;
+  }
+
+  if (action.toLowerCase().includes('help')) {
+    state.morality += 6;
+    state.xp += 15;
+  }
+  if (action.toLowerCase().includes('betray') || action.toLowerCase().includes('steal')) {
+    state.morality -= 8;
+    state.xp += 8;
+  }
+
+  sysText += combatRound(state, action, events);
+
+  if (action.toLowerCase().includes('cure') || action.toLowerCase().includes('antidote')) {
+    state.activeEffects = state.activeEffects.filter((e) => e.id !== 'plague');
+    sysText += 'The plague is purged from your veins. ';
+  }
+
+  state.xp += 8;
+  applyEffects(state, events);
+
+  if (state.xp >= 100) addAchievement(state, '100 XP Gained', events);
+
+  state.health = clamp(state.health, 0, state.maxHealth);
+  state.mana = clamp(state.mana, 0, state.maxMana);
+  state.morality = clamp(state.morality, -100, 100);
+
+  applyXpAndLevel(state, events);
+
+  if (state.health <= 0) {
+    state.gameOver = true;
+    addTitle(state, 'Fallen One', events);
+  }
+
+  state.ending = computeEnding(state, events);
+  if (state.ending) {
+    req.session.profile.completed = true;
+    req.session.profile.titles = Array.from(new Set([...req.session.profile.titles, ...state.titles]));
+    req.session.profile.achievements = Array.from(new Set([...req.session.profile.achievements, ...state.achievements]));
+    req.session.profile.carryStats = {
+      strength: Math.floor(state.stats.strength * 0.2),
+      intelligence: Math.floor(state.stats.intelligence * 0.2),
+      dexterity: Math.floor(state.stats.dexterity * 0.2),
+      charisma: Math.floor(state.stats.charisma * 0.2),
+    };
+    if (state.hardcoreMode && state.health > 0) addAchievement(state, 'Hardcore Conqueror', events);
+  }
+
+  if (state.hardcoreMode && state.health <= 0) {
+    req.session.saves = {};
+  }
+
+  if (state.dailyMode) {
+    const seed = state.dailySeed;
+    if (!dailyBoards[seed]) dailyBoards[seed] = [];
+    const entry = {
+      name: state.name,
+      xp: state.xp,
+      turns: state.turn,
+      bossDefeated: Boolean(state.gameOver && state.health > 0),
+    };
+    dailyBoards[seed] = dailyBoards[seed].filter((e) => e.name !== state.name);
+    dailyBoards[seed].push(entry);
+    dailyBoards[seed].sort((a, b) => (b.bossDefeated - a.bossDefeated) || (b.xp - a.xp) || (b.turns - a.turns));
+    dailyBoards[seed] = dailyBoards[seed].slice(0, 20);
+  }
+
+  const narrative = await aiNarrative(state, action, `${sysText}${state.ending ? ` Ending: ${state.ending}.` : ''}`);
+  state.history.push({ role: 'user', content: action }, { role: 'assistant', content: narrative });
+  if (state.history.length > 30) state.history = state.history.slice(-30);
+
+  res.json({ state, events, narrative, skillTree: SKILL_TREE, dailyLeaderboard: dailyBoards[state.dailySeed || todaySeed()] || [] });
 });
 
 app.post('/api/use-item', (req, res) => {
   const state = getState(req);
   const { itemName } = req.body;
-  const index = state.inventory.findIndex((item) => item.name === itemName);
-  if (index === -1) {
-    return res.status(404).json({ error: 'Item not found.' });
-  }
-
+  const idx = state.inventory.findIndex((i) => i.name === itemName);
+  if (idx < 0) return res.status(404).json({ error: 'Item not found.' });
+  const item = state.inventory[idx];
   const events = [];
-  const item = state.inventory[index];
 
   if (item.type === 'potion') {
     const heal = item.effect.health || 0;
     state.health = clamp(state.health + heal, 0, state.maxHealth);
-    state.inventory.splice(index, 1);
     events.push({ type: 'heal', value: heal });
-  } else if (item.type === 'weapon') {
-    state.stats.strength += item.effect.strength || 1;
-    state.stats.intelligence += item.effect.intelligence || 0;
-    state.inventory.splice(index, 1);
-    state.xp += 15;
+    state.inventory.splice(idx, 1);
   } else if (item.type === 'artifact') {
     state.morality = clamp(state.morality + (item.effect.morality || 0), -100, 100);
-    state.xp += 20;
-    if (item.effect.ascension) {
-      addTitle(state, 'Ascended', events);
-    }
   }
 
-  applyLeveling(state, events);
-  state.ending = determineEnding(state);
   res.json({ state, events, message: `${item.name} used.` });
 });
 
 app.post('/api/save', (req, res) => {
   const state = getState(req);
+  if (state.hardcoreMode) return res.status(403).json({ error: 'Hardcore mode cannot save/load.' });
   const slot = String(req.body.slot || 'slot1');
   req.session.saves[slot] = JSON.parse(JSON.stringify(state));
-  res.json({ message: `Game saved to ${slot}.` });
+  res.json({ message: `Saved to ${slot}.` });
 });
 
 app.post('/api/load', (req, res) => {
+  const state = getState(req);
+  if (state.hardcoreMode) return res.status(403).json({ error: 'Hardcore mode cannot save/load.' });
   const slot = String(req.body.slot || 'slot1');
   const saved = req.session.saves?.[slot];
-  if (!saved) {
-    return res.status(404).json({ error: `No save data in ${slot}.` });
-  }
+  if (!saved) return res.status(404).json({ error: `No save in ${slot}.` });
   req.session.playerState = JSON.parse(JSON.stringify(saved));
+  req.session.playerState.__profileRef = req.session.profile;
   res.json({ state: req.session.playerState, message: `Loaded ${slot}.` });
 });
 

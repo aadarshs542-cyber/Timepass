@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Text Adventure RPG</title>
+  <title>AI Dungeon RPG</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -14,8 +14,9 @@
     <header class="topbar">
       <h1>Chronicles of the Ember Gate</h1>
       <div class="top-actions">
+        <span id="modeBadge" class="badge"></span>
+        <button id="dailyBtn" class="ghost-btn">Daily Challenge</button>
         <button id="themeToggle" class="ghost-btn">🌙 Theme</button>
-        <button id="soundToggle" class="ghost-btn">🔊 Sound On</button>
       </div>
     </header>
 
@@ -32,10 +33,15 @@
           </div>
         </div>
 
+        <div id="bossPanel" class="boss-panel hidden">
+          <span id="bossName">Boss</span>
+          <div class="progress boss"><div id="bossBar"></div></div>
+        </div>
+
         <section id="narrative" class="narrative"></section>
 
         <form id="actionForm" class="action-box">
-          <input id="actionInput" placeholder="Type your action... (attack, cast spell, negotiate, search ruins)" autocomplete="off" />
+          <input id="actionInput" placeholder="Type action (go north, attack, cast spell, help iron legion)" autocomplete="off" />
           <button type="submit">Act</button>
         </form>
 
@@ -44,23 +50,48 @@
           <button id="sheetBtn">Character Sheet</button>
           <button id="saveBtn">Save</button>
           <button id="loadBtn">Load</button>
+          <button id="soundToggle">🔊</button>
         </div>
       </section>
 
-      <aside id="inventoryPanel" class="inventory-panel hidden">
-        <h2>Inventory</h2>
-        <ul id="inventoryList"></ul>
+      <aside class="side-panel">
+        <section class="panel-block">
+          <h3>Mini Map</h3>
+          <div id="miniMap" class="mini-map"></div>
+        </section>
+        <section class="panel-block">
+          <h3>Skill Tree (<span id="skillPoints">0</span>)</h3>
+          <div id="skillTree" class="skill-tree"></div>
+        </section>
+        <section class="panel-block">
+          <h3>Event Log</h3>
+          <ul id="eventLog" class="event-log"></ul>
+        </section>
+        <section class="panel-block">
+          <h3>Daily Leaderboard</h3>
+          <ol id="leaderboard" class="leaderboard"></ol>
+        </section>
       </aside>
     </main>
   </div>
 
+  <aside id="inventoryPanel" class="inventory-panel hidden">
+    <h2>Inventory</h2>
+    <ul id="inventoryList"></ul>
+  </aside>
+
   <div id="allocationModal" class="modal open">
     <div class="modal-content">
-      <h2>Allocate Stats</h2>
+      <h2>New Adventure Setup</h2>
       <label>Name <input id="playerName" value="Adventurer" maxlength="24" /></label>
-      <p>Spend 5 points before beginning your quest.</p>
+      <p>Spend exactly 5 starting stat points.</p>
       <div class="allocation-grid" id="allocationGrid"></div>
       <p id="pointsRemaining">Points Remaining: 5</p>
+      <div class="mode-row">
+        <label><input type="checkbox" id="hardcoreMode" /> 💀 Hardcore Mode</label>
+        <label><input type="checkbox" id="ngPlusMode" /> NG+</label>
+        <label><input type="checkbox" id="dailyMode" /> Daily Challenge</label>
+      </div>
       <button id="startGameBtn">Begin Adventure</button>
     </div>
   </div>
@@ -73,13 +104,8 @@
     </div>
   </div>
 
-  <div id="loading" class="loading hidden">
-    <div class="spinner"></div>
-    <span>Consulting the RPG engine...</span>
-  </div>
-
+  <div id="loading" class="loading hidden"><div class="spinner"></div><span>Oracle is writing fate...</span></div>
   <div id="popupContainer" class="popup-container"></div>
-
   <script src="script.js"></script>
 </body>
 </html>
